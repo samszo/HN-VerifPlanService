@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HN - Vérification des plans de service</title>
+
+    <link rel="stylesheet" type="text/css" href="http://w2ui.com/src/w2ui-1.5.min.css" />
+    <script src="http://ajax.googleapis.com/ajax/libs/jquery/3.5.1/jquery.min.js"></script>
+    <script type="text/javascript" src="http://w2ui.com/src/w2ui-1.5.min.js"></script>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+</head>
+<body>
+    <div id="gridEcsHeures" style="height: 600px"></div>
+    <div id="gridIntHeures" style="height: 300px"></div>
+    
+<script>
+    let intervenants, ecsPlan, ecsMaq, sommes={'intNbHeure':[],'ecsNbHeure':[]}, typeheures = ['TP', 'TD', 'CM']
+        ,recid = 0, s = {};
+    Promise.all([
+        d3.csv("plan de service 21-22-all.csv"),
+        d3.csv("Trame LMD4 Master Humanités numériques-all.csv")
+    ]).then(function([data01, data02]){
+        ecsMaq = data02;
+        // groupe les plans par intervenant
+        intervenants = d3.group(data01, d => d.Intervenant);
+        // groupe les plans par intervenant et EC
+        ecsPlan = d3.group(data01, d=>d.Enseignement);
+        //calcule le total des heures pour les intervenants
+        recid = 0, s = {}; 
+        intervenants.forEach((int,i) => {
+            s = {'recid':recid,'nom':i,'TP':0, 'TD':0, 'CM':0, 'TOT':0};
+            int.forEach(v=>{
+                typeheures.forEach(th=>{
+                    if(v[th]) s[th] += Number(v[th]);
+                });
+            })
+            s.TOT = s.TP+s.TD+s.CM;
+            sommes.intNbHeure.push(s);
+            recid++;
+        });                
+        //calcule le total des heures pour les formations
+        recid = 0, s = {};
+        ecsPlan.forEach((ecs,i) => {
+            s = {'recid':recid,'ec':i,'TP':0, 'TD':0, 'CM':0, 'TOT':0, 'intNbH':""};
+            ecs.forEach(v=>{
+                typeheures.forEach(th=>{
+                    if(v[th]) s[th] += Number(v[th]);
+                });
+                s.intNbH += v.Intervenant+' ('+(Number(v.TP)+Number(v.TD)+Number(v.CM))+'),';
+            })
+            s.TOT = s.TP+s.TD+s.CM;
+            s.intNbH = s.intNbH.slice(0,-1);
+            sommes.ecsNbHeure.push(verifEcMaquette(s));
+            recid++;
+        });                
+        //ajoute les ec sans plan de service
+        recid = sommes.ecsNbHeure.length;
+        ecsMaq.forEach(e=>{
+            if(!e.plan && e['CH chargé']!="0"){
+                s = {'recid':recid,'ec':e['Intitulés des EC de chaque UE '],'TP':0, 'TD':0, 'CM':0, 'TOT':0, 'intNbH':""};
+                s.apogee = e.APOGEE;
+                s.dip=e.formation;
+                s.charge=e['CH chargé'];
+                s.verif= - s.charge;
+                sommes.ecsNbHeure.push(s);
+                recid++;                
+            }
+        })
+
+        
+        $('#gridIntHeures').w2grid({
+            name   : 'gridIntHeures',
+            header: "Nombres d'heure par intervenant",
+            reorderRows: true,
+            show: {
+                header: true,
+                footer: true,
+                toolbar: false,
+                lineNumbers: true
+            },        
+            columns: [
+                { field: 'nom', text: 'nom', size: '40%' , sortable: true},
+                { field: 'CM', text: 'CM', size: '30%' , sortable: true},
+                { field: 'TD', text: 'TD', size: '30%' , sortable: true},
+                { field: 'TP', text: 'TP', size: '30%' , sortable: true},
+                { field: 'TOT', text: 'TOT', size: '30%' , sortable: true},        
+            ],
+                records: sommes.intNbHeure
+            });
+        $('#gridEcsHeures').w2grid({
+            name   : 'gridEcsHeures',
+            header: "Nombres d'heure par EC",
+            reorderRows: true,
+            show: {
+                header: true,
+                footer: true,
+                toolbar: true,
+                lineNumbers: true
+            },        
+            columns: [
+                { field: 'ec', text: 'ec', size: '40%' , sortable: true},
+                { field: 'dip', text: 'diplome', size: '40%' , sortable: true},
+                { field: 'intNbH', text: 'Nb H. Int.', size: '40%' , sortable: true},                     
+                { field: 'CM', text: 'CM', size: '30%' , sortable: true},
+                { field: 'TD', text: 'TD', size: '30%' , sortable: true},
+                { field: 'TP', text: 'TP', size: '30%' , sortable: true},
+                { field: 'TOT', text: 'TOT', size: '30%' , sortable: true},        
+                { field: 'charge', text: 'charge', size: '30%' , sortable: true},        
+                { field: 'verif', text: 'verif.', size: '30%' , sortable: true},        
+            ],
+            records: sommes.ecsNbHeure,
+            toolbar: {
+                items: [
+                    { id: 'exportCSV', type: 'button', text: 'Exporter CSV', icon: 'fa-file'}
+                ],
+                onClick: function (event) {
+                    if (event.target == 'exportCSV') {
+                        var s = w2ui['gridEcsHeures'].getSelection();
+                        if(!s.length)w2alert('Veuillez sélectionner des lignes');
+                        else{
+                            var data=[];
+                            s.forEach(function(i){
+                                data.push(sommes.ecsNbHeure[i]);
+                            });
+                            JSONToCSVConvertor(data,'EC',true);
+                        }
+                    }
+                }
+            },			    
+
+            });
+
+            
+    });
+
+    function verifEcMaquette(ecPlan){
+        let charge=0, dip="", code  = ecPlan.ec.split(' - ')[0]
+            , ecMaq = ecsMaq.filter(e=>e.APOGEE==code);
+        if(ecMaq.length==0)ecPlan['verif']='APOGEE pas trouvé';
+        else{
+            /*
+            ecMaq.sort(function (a, b) {
+                return Number(b['CH chargé']) - Number(a['CH chargé']);
+            });
+            */            
+            ecMaq.forEach(ec => {
+                if(charge < Number(ec['CH chargé']))charge = Number(ec['CH chargé']);
+                dip += ec.formation+',';
+                ec.plan=ecPlan.TOT;
+            });
+            ecPlan.apogee = code
+            ecPlan['dip']=dip.slice(0, -1);
+            ecPlan['charge']=charge
+            ecPlan['verif']=ecPlan.TOT - charge;
+       }
+        return ecPlan;
+    }
+
+
+/**
+ * merci beaucoup à http://jsfiddle.net/hybrid13i/JXrwM/
+ * @param {*} JSONData 
+ * @param {*} ReportTitle 
+ * @param {*} ShowLabel 
+ */
+ function JSONToCSVConvertor(JSONData, ReportTitle, ShowLabel) {
+    //If JSONData is not an object then JSON.parse will parse the JSON string in an Object
+    var arrData = typeof JSONData != 'object' ? JSON.parse(JSONData) : JSONData;
+    
+    var CSV = '';    
+    //Set Report title in first row or line    
+    //CSV += ReportTitle + '\r\n\n';
+
+    //This condition will generate the Label/Header
+    if (ShowLabel) {
+        var row = "";
+        
+        //This loop will extract the label from 1st index of on array
+        for (var index in arrData[0]) {
+            
+            //Now convert each value to string and comma-seprated
+            row += index + ',';
+        }
+
+        row = row.slice(0, -1);
+        
+        //append Label row with line break
+        CSV += row + '\r\n';
+    }
+    
+    //1st loop is to extract each row
+    for (var i = 0; i < arrData.length; i++) {
+        var row = "";
+        
+        //2nd loop will extract each column and convert it in string comma-seprated
+        for (var index in arrData[i]) {
+            row += '"' + arrData[i][index] + '",';
+        }
+
+        row.slice(0, row.length - 1);
+        
+        //add a line break after each row
+        CSV += row + '\r\n';
+    }
+
+    if (CSV == '') {        
+        alert("Invalid data");
+        return;
+    }   
+    
+    //Generate a file name
+    var fileName = "exportCSV_";
+    //this will remove the blank-spaces from the title and replace it with an underscore
+    fileName += ReportTitle.replace(/ /g,"_");   
+    
+    //Initialize file format you want csv or xls
+    var uri = 'data:text/csv;charset=utf-8,' + CSV;//escape(CSV);
+    
+    // Now the little tricky part.
+    // you can use either>> window.open(uri);
+    // but this will not work in some browsers
+    // or you will not get the correct file extension    
+    
+    //this trick will generate a temp <a /> tag
+    var link = document.createElement("a");    
+    link.href = uri;
+    
+    //set the visibility hidden so it will not effect on your web-layout
+    link.style = "visibility:hidden";
+    link.download = fileName + ".csv";
+    
+    //this part will append the anchor tag and remove it after automatic click
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+}
+</script>
+
+</body>
+</html>
